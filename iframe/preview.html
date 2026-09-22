@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>引脚网络重排预览</title>
+<style>
+	:root { --bg:#1e222a; --panel:#262b36; --border:#3a4150; --text:#dfe4ec; --dim:#8b93a5; --accent:#4f8ef7; --ok:#3fb96f; --warn:#e0a85c; --err:#e05c5c; }
+	* { box-sizing:border-box; }
+	html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+		font:13px/1.5 system-ui,"Segoe UI","Microsoft YaHei",sans-serif; }
+	.wrap { padding:12px 16px 64px; }
+	#banner { font-size:12px; padding:6px 10px; border-radius:6px; margin-bottom:10px; display:none; }
+	#banner.show { display:block; background:rgba(224,168,92,.12); color:var(--warn); }
+	.nets { font-size:12px; color:var(--dim); margin:0 0 8px; }
+	.nets b { color:var(--text); }
+	h3 { font-size:13px; color:var(--accent); margin:12px 0 6px; border-bottom:1px solid var(--border); padding-bottom:4px; }
+	.devlist { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }
+	.dev { border:1px solid var(--border); border-radius:8px; padding:8px 12px; cursor:pointer; background:var(--panel); }
+	.dev.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+	.dev .name { font-weight:600; font-size:14px; }
+	.dev .stat { font-size:11px; color:var(--dim); margin-top:2px; }
+	.dev .stat b { color:var(--ok); }
+	.metrics { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--dim); margin:4px 0 8px; }
+	.metrics b { color:var(--text); }
+	.metrics .good { color:var(--ok); }
+	.metrics .bad { color:var(--err); }
+	table { border-collapse:collapse; width:100%; margin:4px 0 10px; font-size:12px; }
+	th,td { border:1px solid var(--border); padding:3px 8px; text-align:left; white-space:nowrap; }
+	th { color:var(--dim); background:var(--panel); position:sticky; top:0; }
+	tr.changed td { background:rgba(79,142,247,.10); }
+	tr.locked td { color:var(--dim); }
+	.arrow { color:var(--accent); font-weight:600; }
+	.warnbox { font-size:12px; color:var(--warn); background:rgba(224,168,92,.10); border-radius:6px; padding:6px 10px; margin:6px 0; }
+	.notebox { font-size:11px; color:var(--dim); margin:6px 0; }
+	#bar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:10px 16px;
+		background:var(--panel); border-top:1px solid var(--border); }
+	#bar button { flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; background:#303748; color:var(--text); cursor:pointer; }
+	#bar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+	#bar button:disabled { opacity:.45; cursor:not-allowed; }
+	#empty { padding:40px 0; text-align:center; color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<div id="banner"></div>
+	<div id="content"><div id="empty">正在读取预览方案…</div></div>
+</div>
+
+<div id="bar">
+	<button id="btnClose">关闭</button>
+	<button id="btnApply" class="primary">应用到 PCB（器件：<span id="chosenName">-</span>）</button>
+</div>
+
+<script>
+(function () {
+	'use strict';
+	var REPORT_KEY = 'schHeaderSwapLastPlan';
+	var CMD_CHANNEL = 'header-swap-cmd';
+	var el = function (id) { return document.getElementById(id); };
+
+	var REASON_TEXT = {
+		'locked-user': '用户锁定',
+		'power': '电源/地网络',
+		'no-net': '无网络',
+		'no-sch-pin': '原理图引脚缺失',
+		'no-pcb-pad': 'PCB 无对应焊盘',
+		'duplicate-net': '网络在本器件重复',
+		'sch-no-stub': '未连独占导线（同步时需手动）',
+		'sch-shared': '连接已共享（同步时需手动）',
+		'sch-netflag': '电源符号承载（同步时需手动）',
+		'net-mismatch': '原理图/PCB 网络名不一致（同步时需手动）',
+	};
+
+	function fmtMm(mil) { return (Math.round(mil / 10) / 100).toFixed(2); }
+	function esc(s) {
+		return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+		});
+	}
+
+	function loadReport() {
+		try {
+			var raw = (typeof eda !== 'undefined' && eda && eda.sys_Storage) ? eda.sys_Storage.getExtensionUserConfig(REPORT_KEY) : null;
+			var r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			return r && typeof r === 'object' && Array.isArray(r.plans) ? r : null;
+		}
+		catch (e) { return null; }
+	}
+
+	var chosen = null;
+
+	function render(report) {
+		var html = '<div class="nets">选中的网络（' + report.selectedNets.length + ' 个）：<b>' + esc(report.selectedNets.join(', ')) + '</b></div>';
+		// 器件卡片：默认选改善最大的
+		var best = -1, bestGain = -1;
+		for (var d = 0; d < report.plans.length; d++) {
+			var p = report.plans[d];
+			var gain = (p.metricsBefore.crossings - p.metricsAfter.crossings) * 1000
+				+ (p.metricsBefore.totalLengthMil - p.metricsAfter.totalLengthMil);
+			if (gain > bestGain) { bestGain = gain; best = d; }
+		}
+		chosen = chosen && report.plans.some(function (x) { return x.headerDesignator === chosen; })
+			? chosen
+			: (best >= 0 ? report.plans[best].headerDesignator : report.plans[0].headerDesignator);
+
+		html += '<h3>选择实施交换的器件</h3><div class="devlist" id="devlist">';
+		for (var i = 0; i < report.plans.length; i++) {
+			var pl = report.plans[i];
+			html += '<div class="dev' + (pl.headerDesignator === chosen ? ' active' : '') + '" data-dev="' + esc(pl.headerDesignator) + '">'
+				+ '<div class="name">' + esc(pl.headerDesignator) + '</div>'
+				+ '<div class="stat">交换 ' + pl.changedCount + ' 脚 · 交叉 ' + pl.metricsBefore.crossings
+				+ ' -> <b>' + pl.metricsAfter.crossings + '</b></div></div>';
+		}
+		html += '</div><div id="planArea"></div>';
+		el('content').innerHTML = html;
+
+		var devEls = document.querySelectorAll('.dev');
+		for (var k = 0; k < devEls.length; k++) {
+			devEls[k].onclick = function () {
+				chosen = this.getAttribute('data-dev');
+				for (var j = 0; j < devEls.length; j++)
+					devEls[j].className = 'dev' + (devEls[j].getAttribute('data-dev') === chosen ? ' active' : '');
+				renderPlan(report);
+			};
+		}
+		renderPlan(report);
+		updateBar(report);
+	}
+
+	function renderPlan(report) {
+		var plan = null;
+		for (var i = 0; i < report.plans.length; i++) {
+			if (report.plans[i].headerDesignator === chosen)
+				plan = report.plans[i];
+		}
+		el('chosenName').textContent = chosen;
+		var rows = '';
+		var changedTotal = 0;
+		for (var j = 0; j < plan.pins.length; j++) {
+			var pin = plan.pins[j];
+			var changed = pin.swappable && pin.newNet !== pin.oldNet;
+			if (changed) changedTotal++;
+			var cls = changed ? 'changed' : (pin.swappable ? '' : 'locked');
+			var netCell = changed
+				? esc(pin.oldNet) + ' <span class="arrow">-></span> ' + esc(pin.newNet)
+				: esc(pin.oldNet || '(空)');
+			var status = changed ? '交换' : (pin.swappable ? '保持' : (REASON_TEXT[pin.lockReason] || '锁定'));
+			rows += '<tr class="' + cls + '"><td>' + esc(pin.pinNumber) + '</td><td>' + netCell + '</td><td>' + status + '</td></tr>';
+		}
+		var crossDelta = plan.metricsAfter.crossings - plan.metricsBefore.crossings;
+		var lenDelta = plan.metricsAfter.totalLengthMil - plan.metricsBefore.totalLengthMil;
+		var html = '<h3>' + esc(plan.headerDesignator) + '（可换 ' + plan.swappableCount + ' 脚，交换 ' + changedTotal + ' 脚）</h3>'
+			+ '<div class="metrics">'
+			+ '<span>鼠线交叉 <b>' + plan.metricsBefore.crossings + '</b> -> <b class="' + (crossDelta <= 0 ? 'good' : 'bad') + '">' + plan.metricsAfter.crossings + '</b></span>'
+			+ '<span>鼠线总长 <b>' + fmtMm(plan.metricsBefore.totalLengthMil) + 'mm</b> -> <b class="' + (lenDelta <= 0 ? 'good' : 'bad') + '">' + fmtMm(plan.metricsAfter.totalLengthMil) + 'mm</b></span>'
+			+ '</div>'
+			+ '<table><tr><th>引脚/焊盘</th><th>网络</th><th>状态</th></tr>' + rows + '</table>';
+		var affected = {};
+		for (var m = 0; m < plan.pins.length; m++) {
+			var p2 = plan.pins[m];
+			if (p2.swappable && p2.newNet !== p2.oldNet)
+				affected[p2.oldNet] = true;
+		}
+		var routed = [];
+		for (var net in affected) {
+			if ((report.routedLengthMil || {})[net] > 0)
+				routed.push(net + '（约 ' + fmtMm(report.routedLengthMil[net]) + 'mm）');
+		}
+		if (routed.length)
+			html += '<div class="warnbox">⚠ 以下受影响网络已有走线，应用后走线网络归属将随焊盘变化：' + esc(routed.join('、')) + '</div>';
+		if ((report.notes || []).length)
+			html += '<div class="notebox">' + report.notes.map(esc).join('<br>') + '</div>';
+		el('planArea').innerHTML = html;
+	}
+
+	function updateBar(report) {
+		var hasChange = report.plans.some(function (p) {
+			return p.pins.some(function (x) { return x.swappable && x.newNet !== x.oldNet; });
+		});
+		el('btnApply').disabled = !hasChange || !!report.appliedPcb;
+		if (report.appliedPcb)
+			el('banner').textContent = '当前方案已应用到 PCB：观察画布鼠线后，用菜单「同步上次交换到原理图」或「撤销上次交换」。';
+		else if (!hasChange)
+			el('banner').textContent = '没有可交换的引脚（可能全部被锁定，或排列已最优）。';
+		else
+			el('banner').textContent = '';
+		if (el('banner').textContent)
+			el('banner').className = 'show';
+	}
+
+	function sendApply() {
+		try {
+			if (typeof eda !== 'undefined' && eda && eda.sys_MessageBus && typeof eda.sys_MessageBus.push === 'function') {
+				eda.sys_MessageBus.push(CMD_CHANNEL, JSON.stringify({ cmd: 'apply', device: chosen }));
+				el('banner').textContent = '已发送应用命令，请在编辑器中确认弹窗…';
+				el('banner').className = 'show';
+				return;
+			}
+		}
+		catch (e) { /* ignore */ }
+		el('banner').textContent = '当前客户端不支持窗口命令通道：请关闭本窗口，用菜单「引脚网络重排 -> 交换选中网络」后在编辑器确认弹窗里选择器件。';
+		el('banner').className = 'show';
+	}
+
+	el('btnApply').onclick = sendApply;
+	el('btnClose').onclick = function () {
+		try { eda.sys_IFrame.closeIFrame('headerswap-preview'); } catch (e) { /* ignore */ }
+	};
+
+	var report = loadReport();
+	if (!report || !report.plans.length) {
+		el('content').innerHTML = '<div id="empty">未找到预览方案：请先在 PCB 中选中网络并执行「交换选中网络」。</div>';
+		el('btnApply').disabled = true;
+		return;
+	}
+	render(report);
+})();
+</script>
+</body>
+</html>

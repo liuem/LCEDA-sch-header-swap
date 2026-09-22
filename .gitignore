@@ -1,0 +1,15 @@
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings.json
+/coverage/
+/dist/
+/node_modules/
+/build/dist/
+/.eslintcache
+debug.log
+
+# 截图取证产物（含工程名，不入库）
+tools/screen*.png
+
+# 实机取证脚本不入开源库（本地保留）
+/tools/

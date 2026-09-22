@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排插网络重排设置</title>
+<style>
+	:root { --bg:#1e222a; --panel:#262b36; --border:#3a4150; --text:#dfe4ec; --dim:#8b93a5; --accent:#4f8ef7; --ok:#3fb96f; --err:#e05c5c; }
+	* { box-sizing:border-box; }
+	html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+		font:13px/1.5 system-ui,"Segoe UI","Microsoft YaHei",sans-serif; }
+	.wrap { padding:12px 16px 64px; }
+	#banner { font-size:12px; padding:6px 10px; border-radius:6px; margin-bottom:10px; display:none; }
+	#banner.err { display:block; background:rgba(224,92,92,.12); color:var(--err); }
+	h3 { font-size:13px; color:var(--accent); margin:12px 0 6px; border-bottom:1px solid var(--border); padding-bottom:4px; }
+	.row { display:flex; align-items:center; gap:10px; margin:7px 0; }
+	.row label { width:200px; color:var(--dim); flex-shrink:0; }
+	input[type=text],input[type=number],select,textarea {
+		flex:1; padding:6px 9px; border:1px solid var(--border); border-radius:6px; background:var(--panel); color:var(--text); font-size:13px; outline:none; }
+	textarea { resize:vertical; min-height:56px; font-family:inherit; }
+	input:focus,select:focus,textarea:focus { border-color:var(--accent); }
+	.hint { font-size:11px; color:var(--dim); margin:-3px 0 6px 210px; }
+	#bar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; padding:10px 16px;
+		background:var(--panel); border-top:1px solid var(--border); }
+	#bar button { flex:1; padding:8px; border:1px solid var(--border); border-radius:6px; background:#303748; color:var(--text); cursor:pointer; }
+	#bar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+	#toast { position:fixed; top:10px; left:50%; transform:translateX(-50%); padding:6px 16px; border-radius:14px;
+		background:var(--accent); color:#fff; font-size:12px; opacity:0; transition:.3s; pointer-events:none; }
+	#toast.show { opacity:1; }
+	#toast.ok { background:var(--ok); }
+	#toast.err { background:var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<div id="banner"></div>
+
+	<h3>锁定与名单</h3>
+	<div class="row"><label>锁定引脚名单</label><input type="text" id="lockPins" placeholder="如 U1.1,J1.2 或 1 2（纯引脚号对所有候选器件生效）"></div>
+	<div class="hint">命中的引脚保持原网络不参与交换（对"位号.引脚号"和纯引脚号两种写法生效）。电源/地脚按下面名单自动锁。</div>
+	<div class="row"><label>视为电源的网络</label><textarea id="powerPatterns" placeholder="逗号/分号/空白分隔，* 通配，忽略大小写整词匹配"></textarea></div>
+	<div class="hint">命中名单的网络不参与交换；3V3/1V8/+5V 等裸电压形态自动识别，无需写进名单。</div>
+	<div class="row"><label></label><button type="button" id="btnDefaultPower" style="flex:1; padding:6px; border:1px solid var(--border); border-radius:6px; background:#303748; color:var(--text); cursor:pointer;">填入默认电源地名单</button></div>
+
+	<h3>优化目标</h3>
+	<div class="row"><label>权重档</label><select id="weightMode">
+		<option value="balanced">均衡（推荐：交叉与线长同看）</option>
+		<option value="crossings">偏重减少交叉</option>
+		<option value="length">偏重缩短线长</option>
+	</select></div>
+	<div class="hint">引脚-网络指派先用匈牙利算法按"最近端点距离"求初解，再按本档权重用 2-opt 精修交叉数。</div>
+	<div class="row"><label>精修轮数上限</label><input type="number" id="maxRefineIters" min="0" max="16" step="1"></div>
+
+	<h3>写画布节奏</h3>
+	<div class="row"><label>起步间隔毫秒</label><input type="number" id="createIntervalMs" min="0" max="1000" step="10"></div>
+	<div class="hint">画布对密集写操作有限流，失败时节奏自动翻倍（封顶 1.2s）、连续成功自动回落，默认 100ms。</div>
+	<div class="row"><label>单项最大重试</label><input type="number" id="maxRetries" min="0" max="10" step="1"></div>
+</div>
+
+<div id="bar">
+	<button id="btnDefaults">恢复默认</button>
+	<button id="btnSave" class="primary">保存设置</button>
+</div>
+<div id="toast"></div>
+
+<script>
+(function () {
+	'use strict';
+	var CONFIG_KEY = 'schHeaderSwapConfig';
+	var el = function (id) { return document.getElementById(id); };
+	var banner = el('banner');
+	var storage = null;
+
+	var DEFAULTS = {
+		lockPins: '',
+		powerPatterns: 'GND*,AGND,DGND,PGND,VCC,VEE,VDD*,VSS*,VBAT,VBUS,VIN,VREF,VDDA,VSSA,AVDD,AVSS,EP,GND,PWR',
+		weightMode: 'balanced',
+		maxRefineIters: 4,
+		createIntervalMs: 100,
+		maxRetries: 3,
+	};
+
+	var NUM_IDS = ['maxRefineIters', 'createIntervalMs', 'maxRetries'];
+
+	function clamp(v, min, max, dflt) {
+		v = Number(v);
+		if (!Number.isFinite(v))
+			return dflt;
+		return Math.max(min, Math.min(max, v));
+	}
+
+	function toast(text, cls) {
+		var t = el('toast');
+		t.textContent = text;
+		t.className = 'show ' + (cls || '');
+		setTimeout(function () { t.className = ''; }, 2600);
+	}
+
+	function initStorage() {
+		try {
+			if (typeof eda !== 'undefined' && eda && eda.sys_Storage) {
+				storage = eda.sys_Storage;
+				return true;
+			}
+		}
+		catch (e) { /* ignore */ }
+		banner.textContent = '当前客户端的 iframe 未注入 eda.sys_Storage，无法保存设置。';
+		banner.className = 'err';
+		el('btnSave').disabled = true;
+		el('btnDefaults').disabled = true;
+		return false;
+	}
+
+	function loadConfig() {
+		if (!storage)
+			return null;
+		try {
+			var raw = storage.getExtensionUserConfig(CONFIG_KEY);
+			var cfg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+			return cfg && typeof cfg === 'object' ? cfg : {};
+		}
+		catch (e) { return {}; }
+	}
+
+	function fill(cfg) {
+		el('lockPins').value = cfg.lockPins || '';
+		el('powerPatterns').value = cfg.powerPatterns !== undefined ? cfg.powerPatterns : DEFAULTS.powerPatterns;
+		el('weightMode').value = cfg.weightMode || DEFAULTS.weightMode;
+		for (var j = 0; j < NUM_IDS.length; j++) {
+			var n = NUM_IDS[j];
+			el(n).value = cfg[n] !== undefined ? cfg[n] : DEFAULTS[n];
+		}
+	}
+
+	function collect() {
+		var cfg = {
+			lockPins: el('lockPins').value.trim(),
+			powerPatterns: el('powerPatterns').value.trim(),
+			weightMode: ['crossings', 'balanced', 'length'].indexOf(el('weightMode').value) >= 0 ? el('weightMode').value : 'balanced',
+			maxRefineIters: Math.round(clamp(el('maxRefineIters').value, 0, 16, DEFAULTS.maxRefineIters)),
+			createIntervalMs: Math.round(clamp(el('createIntervalMs').value, 0, 1000, DEFAULTS.createIntervalMs)),
+			maxRetries: Math.round(clamp(el('maxRetries').value, 0, 10, DEFAULTS.maxRetries)),
+		};
+		return cfg;
+	}
+
+	function save() {
+		if (!storage)
+			return false;
+		var cfg = collect();
+		try {
+			storage.setExtensionUserConfig(CONFIG_KEY, JSON.stringify(cfg));
+			localStorage.setItem('lceda-sch-header-swap.config', JSON.stringify(cfg));
+			fill(cfg);
+			return true;
+		}
+		catch (e) {
+			toast('保存失败：' + e, 'err');
+			return false;
+		}
+	}
+
+	el('btnSave').onclick = function () {
+		if (save())
+			toast('✓ 已保存（下次分析时生效）', 'ok');
+	};
+	el('btnDefaults').onclick = function () {
+		fill(DEFAULTS);
+		toast('已填入默认值，点击「保存设置」生效');
+	};
+	el('btnDefaultPower').onclick = function () {
+		el('powerPatterns').value = DEFAULTS.powerPatterns;
+		toast('已填入默认电源地名单，记得「保存设置」');
+	};
+
+	if (initStorage()) {
+		var saved = loadConfig();
+		var local = null;
+		try { local = JSON.parse(localStorage.getItem('lceda-sch-header-swap.config') || 'null'); }
+		catch (e) { /* ignore */ }
+		fill(saved && Object.keys(saved).length ? saved : (local || DEFAULTS));
+	}
+})();
+</script>
+</body>
+</html>

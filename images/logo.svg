@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1b2a"/>
+      <stop offset="1" stop-color="#1b2f4b"/>
+    </linearGradient>
+    <linearGradient id="chipBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3a55"/>
+      <stop offset="1" stop-color="#1f2d45"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <!-- 背景电路走线装饰 -->
+  <g stroke="#22395c" stroke-width="6" fill="none" opacity="0.55">
+    <path d="M80 180 H300 V420 H520"/>
+    <path d="M80 844 H340 V640 H520"/>
+    <path d="M944 180 H724 V420 H504"/>
+    <path d="M944 844 H684 V640 H504"/>
+  </g>
+  <g fill="#22395c" opacity="0.55">
+    <circle cx="80" cy="180" r="10"/><circle cx="80" cy="844" r="10"/>
+    <circle cx="944" cy="180" r="10"/><circle cx="944" cy="844" r="10"/>
+  </g>
+
+  <!-- 左芯片（引脚朝右） -->
+  <g>
+    <rect x="150" y="362" width="190" height="300" rx="14" fill="url(#chipBody)" stroke="#3d5a86" stroke-width="4"/>
+    <text x="245" y="520" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="40" fill="#9fb8dc" text-anchor="middle" font-weight="bold">U1</text>
+    <g fill="#c9a227" stroke="#8a6f1a" stroke-width="2">
+      <rect x="340" y="392" width="42" height="26" rx="4"/>
+      <rect x="340" y="462" width="42" height="26" rx="4"/>
+      <rect x="340" y="532" width="42" height="26" rx="4"/>
+      <rect x="340" y="602" width="42" height="26" rx="4"/>
+    </g>
+  </g>
+  <!-- 右芯片（引脚朝左） -->
+  <g>
+    <rect x="684" y="362" width="190" height="300" rx="14" fill="url(#chipBody)" stroke="#3d5a86" stroke-width="4"/>
+    <text x="779" y="520" font-family="Arial, 'Microsoft YaHei', sans-serif" font-size="40" fill="#9fb8dc" text-anchor="middle" font-weight="bold">U2</text>
+    <g fill="#c9a227" stroke="#8a6f1a" stroke-width="2">
+      <rect x="642" y="392" width="42" height="26" rx="4"/>
+      <rect x="642" y="462" width="42" height="26" rx="4"/>
+      <rect x="642" y="532" width="42" height="26" rx="4"/>
+      <rect x="642" y="602" width="42" height="26" rx="4"/>
+    </g>
+  </g>
+
+  <!-- 上层：交叉的旧鼠线（红色，半透明） -->
+  <g stroke="#e05252" stroke-width="7" fill="none" opacity="0.42" stroke-linecap="round">
+    <path d="M382 405 C 480 405, 544 605, 642 605"/>
+    <path d="M382 475 C 500 475, 520 475, 642 475"/>
+    <path d="M382 545 C 500 545, 520 545, 642 545"/>
+    <path d="M382 615 C 480 615, 544 405, 642 405"/>
+  </g>
+  <!-- 下层：理顺后的新连接（绿色） -->
+  <g stroke="#3ddc84" stroke-width="9" fill="none" stroke-linecap="round">
+    <path d="M382 405 H642" />
+    <path d="M382 475 H642" />
+    <path d="M382 545 H642" />
+    <path d="M382 615 H642" />
+  </g>
+
+  <!-- 中央重排按钮 -->
+  <g>
+    <circle cx="512" cy="510" r="86" fill="#123055" stroke="#4f8fdc" stroke-width="6"/>
+    <path d="M468 470 h34 v-14 l40 26 -40 26 v-14 h-34 z" fill="#eaf3ff"/>
+    <g stroke="#eaf3ff" stroke-width="8" stroke-linecap="round">
+      <path d="M540 496 h30"/>
+      <path d="M540 514 h30"/>
+      <path d="M540 532 h30"/>
+    </g>
+  </g>
+</svg>
