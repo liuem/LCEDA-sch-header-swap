@@ -1,7 +1,7 @@
 {
 	"name": "lceda-sch-header-swap",
 	"type": "module",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "LCEDA Pro extension: permute header/connector pin nets on the schematic to minimize PCB ratsnest crossings",
 	"license": "Apache-2.0",
 	"engines": {

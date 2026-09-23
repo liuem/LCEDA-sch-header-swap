@@ -3,7 +3,7 @@
 	"uuid": "fe570e25713925c53f575bd465ad4b29",
 	"displayName": "引脚网络重排",
 	"description": "在 PCB 中选中要交换的网络（如 MCU-FPGA 排线网络），从网络连接的器件中选择实施交换的器件（排插/MCU/FPGA 均可），按鼠线交叉与总线长求解最优引脚-网络指派（匈牙利算法 + 2-opt 精修）：应用后直接改焊盘网络、画布鼠线即时可见，满意再同步原理图，不满意一键撤销。",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"publisher": "liuem",
 	"engines": {
 		"eda": "^3.2.0"
@@ -24,8 +24,7 @@
 		"Schematic"
 	],
 	"images": {
-		"logo": "./images/logo.png",
-		"banner": "./images/banner.jpg"
+		"logo": "./images/logo.png"
 	},
 	"homepage": "https://github.com/liuem/LCEDA-sch-header-swap",
 	"bugs": "https://github.com/liuem/LCEDA-sch-header-swap/issues",

@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const process = require('node:process');
 const JSZip = require('jszip');
 
-const pkg = process.argv[2] || 'build/dist/lceda-sch-header-swap_v0.3.1.eext';
+const pkg = process.argv[2] || 'build/dist/lceda-sch-header-swap_v0.3.2.eext';
 JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 	const names = Object.keys(z.files).filter(n => !z.files[n].dir);
 	console.log('包内文件:');
@@ -12,9 +12,15 @@ JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 	if (!names.includes('iframe/preview.html'))
 		throw new Error('缺少 iframe/preview.html（预览窗口）');
 	// extension.json 声明了 images 字段 -> 包内必须有真实文件（缺失会导致客户端加载失败、菜单不出现）
-	for (const img of ['images/logo.png', 'images/banner.jpg']) {
+	for (const img of ['images/logo.png']) {
 		if (!names.includes(img))
 			throw new Error(`缺少 ${img}（extension.json 已声明，客户端加载不到会不激活）`);
+	}
+	// 2026-09-23 起不再提供 banner：声明了但文件缺失会导致客户端加载失败/菜单不出现（v0.1.0 踩过的坑），
+	// 因此 banner 声明与 banner 文件都必须不存在
+	for (const banned of ['images/banner.jpg', 'images/banner.svg']) {
+		if (names.includes(banned))
+			throw new Error(`包内不应再包含 ${banned}（banner 已弃用）`);
 	}
 	// 功能演示图必须随包 + README 引用（商店详情页展示 README 时图片要可见）
 	const demos = ['demo-menu', 'demo-before', 'demo-select', 'demo-preview', 'demo-after', 'demo-undo-sync', 'demo-settings'];
@@ -27,13 +33,15 @@ JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 		if (!readme.includes(`images/${d}.png`))
 			throw new Error(`README 未引用 images/${d}.png`);
 	}
-	// logo/banner 的 SVG 源随包（可复现/编辑）
-	for (const svg of ['images/logo.svg', 'images/banner.svg']) {
+	// logo 的 SVG 源随包（可复现/编辑）
+	for (const svg of ['images/logo.svg']) {
 		if (!names.includes(svg))
 			throw new Error(`缺少 ${svg}（图像源文件）`);
 	}
 	const cfg = JSON.parse(await z.file('extension.json').async('string'));
 	console.log('版本:', cfg.version, '| 名称:', cfg.name, '| 菜单环境:', Object.keys(cfg.headerMenus).filter(k => cfg.headerMenus[k].length).join(','));
+	if (cfg.images?.banner)
+		throw new Error('extension.json 不应声明 images.banner（banner 已弃用；声明了但包内无文件会导致客户端不激活）');
 	if (!cfg.headerMenus.pcb?.length)
 		throw new Error('菜单应挂在 headerMenus.pcb（PCB 插件）');
 	console.log('菜单函数:', cfg.headerMenus.pcb[0].menuItems.map(m => m.registerFn).join(', '));

@@ -27,7 +27,7 @@ declare const eda: any;
 
 /* 版本标记：扩展加载即写入，供桥接诊断直接确认客户端实际加载的版本 */
 try {
-	eda.sys_Storage?.setExtensionUserConfig?.('schHeaderSwapVersion', '0.3.1');
+	eda.sys_Storage?.setExtensionUserConfig?.('schHeaderSwapVersion', '0.3.2');
 }
 catch { /* ignore */ }
 

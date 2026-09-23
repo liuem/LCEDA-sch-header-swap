@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (2026-09-23)
+
+移除 banner 横幅图（`images/banner.jpg`、`images/banner.svg` 与 extension.json 的
+`images.banner` 声明）：上架物料只保留 logo，功能无变化。注意声明了 banner 但包内
+无文件会导致客户端加载失败/菜单不出现（v0.1.0 踩过的坑），verify-pkg 加守卫确保
+banner 声明与文件都不存在。
+
 ## 0.3.1 (2026-09-22)
 
 三处实机反馈修复（Run API Gateway 桥接 + 截屏取证）：
