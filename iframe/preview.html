@@ -98,6 +98,8 @@
 			var p = report.plans[d];
 			var gain = (p.metricsBefore.crossings - p.metricsAfter.crossings) * 1000
 				+ (p.metricsBefore.totalLengthMil - p.metricsAfter.totalLengthMil);
+			if (p.routing)
+				gain += (p.routing.before.score - p.routing.after.score) / 100;
 			if (gain > bestGain) { bestGain = gain; best = d; }
 		}
 		chosen = chosen && report.plans.some(function (x) { return x.headerDesignator === chosen; })
@@ -148,14 +150,26 @@
 			var status = changed ? '交换' : (pin.swappable ? '保持' : (REASON_TEXT[pin.lockReason] || '锁定'));
 			rows += '<tr class="' + cls + '"><td>' + esc(pin.pinNumber) + '</td><td>' + netCell + '</td><td>' + status + '</td></tr>';
 		}
-		var crossDelta = plan.metricsAfter.crossings - plan.metricsBefore.crossings;
-		var lenDelta = plan.metricsAfter.totalLengthMil - plan.metricsBefore.totalLengthMil;
-		var html = '<h3>' + esc(plan.headerDesignator) + '（可换 ' + plan.swappableCount + ' 脚，交换 ' + changedTotal + ' 脚）</h3>'
-			+ '<div class="metrics">'
-			+ '<span>鼠线交叉 <b>' + plan.metricsBefore.crossings + '</b> -> <b class="' + (crossDelta <= 0 ? 'good' : 'bad') + '">' + plan.metricsAfter.crossings + '</b></span>'
-			+ '<span>鼠线总长 <b>' + fmtMm(plan.metricsBefore.totalLengthMil) + 'mm</b> -> <b class="' + (lenDelta <= 0 ? 'good' : 'bad') + '">' + fmtMm(plan.metricsAfter.totalLengthMil) + 'mm</b></span>'
-			+ '</div>'
-			+ '<table><tr><th>引脚/焊盘</th><th>网络</th><th>状态</th></tr>' + rows + '</table>';
+			var crossDelta = plan.metricsAfter.crossings - plan.metricsBefore.crossings;
+			var lenDelta = plan.metricsAfter.totalLengthMil - plan.metricsBefore.totalLengthMil;
+			var html = '<h3>' + esc(plan.headerDesignator) + '（可换 ' + plan.swappableCount + ' 脚，交换 ' + changedTotal + ' 脚）</h3>'
+				+ '<div class="metrics">'
+				+ '<span>鼠线交叉 <b>' + plan.metricsBefore.crossings + '</b> -> <b class="' + (crossDelta <= 0 ? 'good' : 'bad') + '">' + plan.metricsAfter.crossings + '</b></span>'
+				+ '<span>鼠线总长 <b>' + fmtMm(plan.metricsBefore.totalLengthMil) + 'mm</b> -> <b class="' + (lenDelta <= 0 ? 'good' : 'bad') + '">' + fmtMm(plan.metricsAfter.totalLengthMil) + 'mm</b></span>'
+				+ '</div>';
+			if (plan.routing) {
+				var rb = plan.routing.before, ra = plan.routing.after;
+				var viaDelta = ra.vias - rb.vias;
+				var unroutedDelta = ra.unrouted - rb.unrouted;
+				var rLenDelta = ra.lengthMil - rb.lengthMil;
+				html += '<div class="metrics">'
+					+ '<span title="在内存中对候选指派做两层网格迷宫布线的估算结果">局部布线（' + (plan.costModelUsed === 'routing' ? '布线模型' : '') + ' 网格 ' + ra.gridMil + 'mil）</span>'
+					+ '<span>未布通 <b>' + rb.unrouted + '</b> -> <b class="' + (unroutedDelta <= 0 ? 'good' : 'bad') + '">' + ra.unrouted + '</b></span>'
+					+ '<span>需过孔 <b>' + rb.vias + '</b> -> <b class="' + (viaDelta <= 0 ? 'good' : 'bad') + '">' + ra.vias + '</b></span>'
+					+ '<span>走线总长 <b>' + fmtMm(rb.lengthMil) + 'mm</b> -> <b class="' + (rLenDelta <= 0 ? 'good' : 'bad') + '">' + fmtMm(ra.lengthMil) + 'mm</b></span>'
+					+ '</div>';
+			}
+			html += '<table><tr><th>引脚/焊盘</th><th>网络</th><th>状态</th></tr>' + rows + '</table>';
 		var affected = {};
 		for (var m = 0; m < plan.pins.length; m++) {
 			var p2 = plan.pins[m];

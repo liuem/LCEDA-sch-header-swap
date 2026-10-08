@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const process = require('node:process');
 const JSZip = require('jszip');
 
-const pkg = process.argv[2] || 'build/dist/lceda-sch-header-swap_v0.3.2.eext';
+const pkg = process.argv[2] || 'build/dist/lceda-sch-header-swap_v0.4.0.eext';
 JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 	const names = Object.keys(z.files).filter(n => !z.files[n].dir);
 	console.log('包内文件:');
@@ -55,7 +55,7 @@ JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 	// 但 ASCII 字符（如 /）不转义——esc 只转非 ASCII，两种形式都匹配
 	const esc = s => Array.from(s).map(c => (c.charCodeAt(0) > 127 ? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()}` : c)).join('');
 	const hasStr = s => src.includes(s) || src.includes(esc(s));
-	for (const k of ['hungarian', 'solveHeaderSwap', 'virtualBoardPads', 'classifyHeaderPins', 'buildDevicePinsPlan', 'buildPinPlans', 'makePowerMatcher', 'evaluateRatsnest', 'mstEdges', 'AdaptivePacer', 'applyDeviceToPcb', 'syncReportToSch', 'undoSwapLedger', 'collectBoardState', 'findSchPageWithDevice', 'readSelectedPcbNets', 'solveForDevice', 'dmt_Project', 'dmt_EditorControl', 'dmt_SelectControl', 'openDocument', 'activateDocument', 'getCurrentProjectAllNets', 'sch_PrimitiveWire', 'pcb_SelectControl', 'pcb_PrimitivePad', 'pcb_PrimitiveLine', 'pcb_Document', 'startCalculatingRatline', 'getAllSelectedPrimitives', 'getAllPinsByPrimitiveId', 'getState_ParentComponentPrimitiveId', 'schHeaderSwapConfig', 'schHeaderSwapLastPlan', 'schHeaderSwapLedger', '__HDRSWAP_TMP_', 'header-swap-cmd', '引脚网络重排', '撤销上次交换', '同步到原理图', '电源/地名单', 'net-mismatch'])
+	for (const k of ['hungarian', 'solveHeaderSwap', 'virtualBoardPads', 'classifyHeaderPins', 'buildDevicePinsPlan', 'buildPinPlans', 'makePowerMatcher', 'evaluateRatsnest', 'mstEdges', 'AdaptivePacer', 'applyDeviceToPcb', 'syncReportToSch', 'undoSwapLedger', 'collectBoardState', 'findSchPageWithDevice', 'readSelectedPcbNets', 'solveForDevice', 'dmt_Project', 'dmt_EditorControl', 'dmt_SelectControl', 'openDocument', 'activateDocument', 'getCurrentProjectAllNets', 'sch_PrimitiveWire', 'pcb_SelectControl', 'pcb_PrimitivePad', 'pcb_PrimitiveLine', 'pcb_Document', 'startCalculatingRatline', 'getAllSelectedPrimitives', 'getAllPinsByPrimitiveId', 'getState_ParentComponentPrimitiveId', 'schHeaderSwapConfig', 'schHeaderSwapLastPlan', 'schHeaderSwapLedger', '__HDRSWAP_TMP_', 'header-swap-cmd', '引脚网络重排', '撤销上次交换', '同步到原理图', '电源/地名单', 'net-mismatch', 'createRoutingSession', 'routeAll', 'estimateEscapeCost', 'deriveDeviceFactsMap', 'solveRoutingSwap', 'costModel'])
 		console.log(`  含 ${k}:`, hasStr(k));
 	// 关键校验：函数导出（headerMenus registerFn 必须都在 bundle 里）
 	for (const fn of ['runNetSwap', 'syncLastSwapToSch', 'undoLastSwap', 'openSettingsPanel', 'about']) {
@@ -65,7 +65,7 @@ JSZip.loadAsync(fs.readFileSync(pkg)).then(async (z) => {
 	if (!cfg.headerMenus.pcb[0].menuItems.some(m => m.id === 'shs-run' && m.registerFn === 'runNetSwap'))
 		throw new Error('extension.json 缺少「交换选中网络」菜单项');
 	const html = await z.file('iframe/settings.html').async('string');
-	for (const k of ['schHeaderSwapConfig', 'lockPins', 'powerPatterns', 'weightMode', 'maxRefineIters', 'btnSave', 'btnDefaults', 'btnDefaultPower'])
+	for (const k of ['schHeaderSwapConfig', 'lockPins', 'powerPatterns', 'weightMode', 'costModel', 'maxRefineIters', 'btnSave', 'btnDefaults', 'btnDefaultPower'])
 		console.log(`  面板含 ${k}:`, html.includes(k));
 	const prev = await z.file('iframe/preview.html').async('string');
 	for (const k of ['schHeaderSwapLastPlan', 'devlist', 'btnApply', 'chosenName', 'header-swap-cmd', 'sys_MessageBus', 'REASON_TEXT'])

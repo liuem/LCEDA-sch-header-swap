@@ -43,12 +43,18 @@
 	<div class="row"><label></label><button type="button" id="btnDefaultPower" style="flex:1; padding:6px; border:1px solid var(--border); border-radius:6px; background:#303748; color:var(--text); cursor:pointer;">填入默认电源地名单</button></div>
 
 	<h3>优化目标</h3>
+	<div class="row"><label>代价模型</label><select id="costModel">
+		<option value="auto">内存局部布线（推荐：真实可布性）</option>
+		<option value="routing">仅布线评估（不可行时报错）</option>
+		<option value="ratsnest">鼠线 MST+交叉（旧模型）</option>
+	</select></div>
+	<div class="hint">布线模型在内存里对候选指派做两层网格迷宫布线（过孔/绕行带代价、引脚沿边出线），选出真实布线最顺的指派；不可行（引脚过多/区域过大）自动回退旧模型。鼠线模型只看直线距离与交叉数，会把"直线近但穿芯片"的指派当最优。</div>
 	<div class="row"><label>权重档</label><select id="weightMode">
 		<option value="balanced">均衡（推荐：交叉与线长同看）</option>
 		<option value="crossings">偏重减少交叉</option>
 		<option value="length">偏重缩短线长</option>
 	</select></div>
-	<div class="hint">引脚-网络指派先用匈牙利算法按"最近端点距离"求初解，再按本档权重用 2-opt 精修交叉数。</div>
+	<div class="hint">权重档仅作用于鼠线模型；布线模型下不生效。引脚-网络指派先用匈牙利算法求初解（布线模型用绕行代价），再用 2-opt 精修。</div>
 	<div class="row"><label>精修轮数上限</label><input type="number" id="maxRefineIters" min="0" max="16" step="1"></div>
 
 	<h3>写画布节奏</h3>
@@ -75,6 +81,7 @@
 		lockPins: '',
 		powerPatterns: 'GND*,AGND,DGND,PGND,VCC,VEE,VDD*,VSS*,VBAT,VBUS,VIN,VREF,VDDA,VSSA,AVDD,AVSS,EP,GND,PWR',
 		weightMode: 'balanced',
+		costModel: 'auto',
 		maxRefineIters: 4,
 		createIntervalMs: 100,
 		maxRetries: 3,
@@ -126,6 +133,7 @@
 		el('lockPins').value = cfg.lockPins || '';
 		el('powerPatterns').value = cfg.powerPatterns !== undefined ? cfg.powerPatterns : DEFAULTS.powerPatterns;
 		el('weightMode').value = cfg.weightMode || DEFAULTS.weightMode;
+		el('costModel').value = ['ratsnest', 'routing', 'auto'].indexOf(cfg.costModel) >= 0 ? cfg.costModel : DEFAULTS.costModel;
 		for (var j = 0; j < NUM_IDS.length; j++) {
 			var n = NUM_IDS[j];
 			el(n).value = cfg[n] !== undefined ? cfg[n] : DEFAULTS[n];
@@ -137,6 +145,7 @@
 			lockPins: el('lockPins').value.trim(),
 			powerPatterns: el('powerPatterns').value.trim(),
 			weightMode: ['crossings', 'balanced', 'length'].indexOf(el('weightMode').value) >= 0 ? el('weightMode').value : 'balanced',
+			costModel: ['ratsnest', 'routing', 'auto'].indexOf(el('costModel').value) >= 0 ? el('costModel').value : 'auto',
 			maxRefineIters: Math.round(clamp(el('maxRefineIters').value, 0, 16, DEFAULTS.maxRefineIters)),
 			createIntervalMs: Math.round(clamp(el('createIntervalMs').value, 0, 1000, DEFAULTS.createIntervalMs)),
 			maxRetries: Math.round(clamp(el('maxRetries').value, 0, 10, DEFAULTS.maxRetries)),

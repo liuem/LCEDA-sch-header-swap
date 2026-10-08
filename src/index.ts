@@ -27,7 +27,7 @@ declare const eda: any;
 
 /* 版本标记：扩展加载即写入，供桥接诊断直接确认客户端实际加载的版本 */
 try {
-	eda.sys_Storage?.setExtensionUserConfig?.('schHeaderSwapVersion', '0.3.2');
+	eda.sys_Storage?.setExtensionUserConfig?.('schHeaderSwapVersion', '0.4.0');
 }
 catch { /* ignore */ }
 
@@ -60,7 +60,16 @@ export function solveForDevice(
 	boardPads: Array<{ designator: string; padNumber: string; net: string; x: number; y: number; padId?: string }>,
 	weightMode: 'crossings' | 'balanced' | 'length',
 	maxRefineIters: number,
-): { metricsBefore: { totalLengthMil: number; crossings: number }; metricsAfter: { totalLengthMil: number; crossings: number }; changedCount: number; swappableCount: number } {
+	costModel: 'ratsnest' | 'routing' | 'auto' = 'ratsnest',
+): {
+	metricsBefore: { totalLengthMil: number; crossings: number };
+	metricsAfter: { totalLengthMil: number; crossings: number };
+	changedCount: number;
+	swappableCount: number;
+	costModelUsed: 'ratsnest' | 'routing';
+	routing?: { before: import('./types.ts').RoutingSummary; after: import('./types.ts').RoutingSummary };
+	routingNotes: string[];
+} {
 	const swappable = pins.filter(p => p.swappable && p.pad);
 	const padKey = (p: { padId?: string; designator: string; padNumber: string }) => p.padId ?? `${p.designator}.${p.padNumber}`;
 	const slotKeys = new Set(swappable.map(p => padKey(p.pad!)));
@@ -70,7 +79,7 @@ export function solveForDevice(
 		// 其它端点 = 同网络全板焊盘，但排除本器件参与交换的焊盘（其余器件焊盘全保留在点集内）
 		others: boardPads.filter(b => b.net === p.oldNet && !slotKeys.has(padKey(b))),
 	}));
-	const result = solveHeaderSwap(slots, nets, boardPads, deviceDesignator, { weightMode, maxRefineIters });
+	const result = solveHeaderSwap(slots, nets, boardPads, deviceDesignator, { weightMode, maxRefineIters, costModel });
 	swappable.forEach((p, i) => {
 		p.newNet = nets[result.assignment[i]].net;
 	});
@@ -79,6 +88,9 @@ export function solveForDevice(
 		metricsAfter: result.metricsAfter,
 		changedCount: result.changedCount,
 		swappableCount: swappable.length,
+		costModelUsed: result.costModelUsed,
+		routing: result.routing,
+		routingNotes: result.routingNotes,
 	};
 }
 
@@ -119,7 +131,9 @@ async function buildReport(onProgress?: (pct: number, msg: string) => void): Pro
 	const plans = [];
 	for (const device of candidates) {
 		const pins = buildDevicePinsPlan(device, board.pads, selectedSet, cfg);
-		const solved = solveForDevice(device, pins, board.pads, cfg.weightMode, cfg.maxRefineIters);
+		const solved = solveForDevice(device, pins, board.pads, cfg.weightMode, cfg.maxRefineIters, cfg.costModel);
+		for (const note of solved.routingNotes)
+			notes.push(`${device}：${note}`);
 		plans.push({
 			headerDesignator: device,
 			pins,
@@ -127,6 +141,9 @@ async function buildReport(onProgress?: (pct: number, msg: string) => void): Pro
 			metricsAfter: solved.metricsAfter,
 			changedCount: solved.changedCount,
 			swappableCount: solved.swappableCount,
+			costModelUsed: solved.costModelUsed,
+			routing: solved.routing,
+			routingNotes: solved.routingNotes,
 		});
 	}
 	onProgress?.(95, '生成报告…');

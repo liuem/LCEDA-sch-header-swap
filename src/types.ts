@@ -83,6 +83,9 @@ export interface HeaderPinPlan {
 /** 优化目标权重档 */
 export type WeightMode = 'crossings' | 'balanced' | 'length';
 
+/** 代价模型：鼠线 MST+交叉（旧） / 内存局部布线（新） / 自动（优先布线，不可行回退鼠线） */
+export type CostModel = 'ratsnest' | 'routing' | 'auto';
+
 export interface HeaderSwapConfig {
 	/** 锁定引脚名单：逗号/分号/空白分隔，条目 "位号.引脚号"（如 J1.1）或纯引脚号（作用于全部候选器件） */
 	lockPins: string;
@@ -90,6 +93,8 @@ export interface HeaderSwapConfig {
 	powerPatterns: string;
 	/** 目标函数权重档：偏重交叉 / 均衡 / 偏重线长 */
 	weightMode: WeightMode;
+	/** 代价模型：auto=内存局部布线优先（不可行自动回退鼠线）；routing=强制布线；ratsnest=旧鼠线模型 */
+	costModel: CostModel;
 	/** 2-opt 精修轮数上限（每轮遍历全部交换对） */
 	maxRefineIters: number;
 	/** 写画布的起步间隔毫秒（失败自适应翻倍，画布限流经验值） */
@@ -102,6 +107,7 @@ export const DEFAULT_CONFIG: HeaderSwapConfig = {
 	lockPins: '',
 	powerPatterns: 'GND*,AGND,DGND,PGND,VCC,VEE,VDD*,VSS*,VBAT,VBUS,VIN,VREF,VDDA,VSSA,AVDD,AVSS,EP,GND,PWR',
 	weightMode: 'balanced',
+	costModel: 'auto',
 	maxRefineIters: 4,
 	createIntervalMs: 100,
 	maxRetries: 3,
@@ -116,6 +122,24 @@ export interface SwapPlan {
 	/** 发生交换的引脚数 */
 	changedCount: number;
 	swappableCount: number;
+	/** 实际使用的代价模型（v0.4.0 起） */
+	costModelUsed?: 'ratsnest' | 'routing';
+	/** 内存局部布线指标（costModelUsed='routing' 时存在） */
+	routing?: { before: RoutingSummary; after: RoutingSummary };
+	/** 布线模型相关提示（降级原因/截断说明等） */
+	routingNotes?: string[];
+}
+
+/** 布线评估摘要（与 router.ts 的 RoutingSummary 同构，types 层避免循环依赖直接声明） */
+export interface RoutingSummary {
+	routed: number;
+	unrouted: number;
+	vias: number;
+	lengthMil: number;
+	score: number;
+	gridMil: number;
+	gridW: number;
+	gridH: number;
 }
 
 /**

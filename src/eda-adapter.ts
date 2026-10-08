@@ -45,6 +45,8 @@ export function loadConfig(): HeaderSwapConfig {
 	const cfg = { ...DEFAULT_CONFIG, ...(saved && typeof saved === 'object' ? saved : {}) };
 	if (!['crossings', 'balanced', 'length'].includes(cfg.weightMode))
 		cfg.weightMode = 'balanced';
+	if (!['ratsnest', 'routing', 'auto'].includes(cfg.costModel))
+		cfg.costModel = DEFAULT_CONFIG.costModel;
 	if (!Number.isFinite(cfg.maxRefineIters) || cfg.maxRefineIters < 0)
 		cfg.maxRefineIters = DEFAULT_CONFIG.maxRefineIters;
 	if (!Number.isFinite(cfg.createIntervalMs) || cfg.createIntervalMs < 0)

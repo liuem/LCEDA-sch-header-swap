@@ -1,11 +1,20 @@
+import type { Slot, SwappableNet } from '../src/solver.ts';
 import type { PageNetFlag, PagePinRef, PageWire } from '../src/stub-model.ts';
-import type { Pad, SchHeader } from '../src/types.ts';
 
 /* ---------------- 被测模块（纯逻辑直接导入） ---------------- */
 
+import type { Pad, SchHeader } from '../src/types.ts';
 import process from 'node:process';
 import { countCrossings, evaluateRatsnest, mstEdges, netSegments } from '../src/metrics.ts';
-import { CROSSING_WEIGHT_MIL, hungarian, solveHeaderSwap, virtualBoardPads } from '../src/solver.ts';
+import { createRoutingSession, DEFAULT_ROUTING_WEIGHTS, estimateEscapeCost, routeAll } from '../src/router.ts';
+import {
+	CROSSING_WEIGHT_MIL,
+	deriveDeviceFactsMap,
+	escapeOf,
+	hungarian,
+	solveHeaderSwap,
+	virtualBoardPads,
+} from '../src/solver.ts';
 import {
 	buildPinPlans,
 	classifyHeaderPins,
@@ -978,6 +987,173 @@ async function main(): Promise<void> {
 		await createPcbHooks().refreshPcbCanvas('pcb-uuid-1');
 		ok(!mk.calls.editor.some(e => e.startsWith('close:')), 'H28 无关闭接口时不关页签');
 		eq(mk.calls.ratlineRefresh, 1, 'H29 退级走 ratline start/stop 循环');
+	}
+
+	/* ---------------- R. 内存局部布线器（v0.4.0） ---------------- */
+	{
+		const w = { ...DEFAULT_ROUTING_WEIGHTS, gridMil: 10 };
+		// R1/R2 开阔直线：布通且零过孔
+		const r1 = routeAll([{ net: 'A', from: { x: 0, y: 0 }, targets: [{ x: 100, y: 0 }] }], [], [], w);
+		ok(!('fellBack' in r1) && r1.routed === 1 && r1.unrouted === 0, 'R1 开阔直线布通');
+		ok(!('fellBack' in r1) && r1.vias === 0, 'R2 直线零过孔');
+		// R3/R4 两网十字：顺序布线下后布的网被迫换层（过孔代价调低使换层比绕线端更划算）
+		const wCross = { ...w, viaPenaltyMil: 60 };
+		const cross = routeAll([
+			{ net: 'H', from: { x: -200, y: 0 }, targets: [{ x: 200, y: 0 }] },
+			{ net: 'V', from: { x: 0, y: -50 }, targets: [{ x: 0, y: 50 }] },
+		], [], [], wCross);
+		ok(!('fellBack' in cross) && cross.routed === 2 && cross.unrouted === 0, 'R3 十字两网全布通');
+		ok(!('fellBack' in cross) && cross.vias >= 1, 'R4 交叉迫使换层过孔');
+		// R5 出线方向约束：目标在左也必须先向右出线
+		const esc = routeAll([{ net: 'E', from: { x: 0, y: 0 }, fromEscape: { dx: 1, dy: 0 }, targets: [{ x: -100, y: 0 }] }], [], [], w);
+		ok(!('fellBack' in esc) && esc.paths[0] && esc.paths[0].pts[1].x > esc.paths[0].pts[0].x, 'R5 第一步沿出线方向');
+		// R6 矩形障碍绕行
+		const detour = routeAll([{ net: 'D', from: { x: 0, y: 0 }, targets: [{ x: 200, y: 0 }] }], [], [{ x0: 90, y0: -20, x1: 110, y1: 20 }], w);
+		ok(!('fellBack' in detour) && detour.routed === 1 && detour.lengthMil > 200, 'R6 绕障碍布通且更长');
+		// R7 焊盘障碍：异网挡路要绕、本网端点放行
+		const padBlk = routeAll(
+			[{ net: 'P', from: { x: 0, y: 0 }, targets: [{ x: 100, y: 0 }] }],
+			[
+				{ x: 50, y: 0, r: 20, net: 'OTHER' },
+				{ x: 0, y: 0, r: 20, net: 'P' },
+				{ x: 100, y: 0, r: 20, net: 'P' },
+			],
+			[],
+			w,
+		);
+		ok(!('fellBack' in padBlk) && padBlk.routed === 1, 'R7 异网焊盘挡路可绕、本网端点可通行');
+		// R8 绕行代价估计
+		eq(estimateEscapeCost({ x: 0, y: 0 }, [{ x: 100, y: 0 }], []), 100, 'R8a 无遮挡=曼哈顿');
+		eq(estimateEscapeCost({ x: -100, y: 0 }, [{ x: 100, y: 0 }], [{ x0: -20, y0: -20, x1: 20, y1: 20 }]), 240, 'R8b 穿体改经角绕行');
+		// R9 会话快照回滚
+		const s = createRoutingSession([
+			{ net: 'A', from: { x: 0, y: 0 }, targets: [{ x: 100, y: 0 }] },
+			{ net: 'B', from: { x: 0, y: 30 }, targets: [{ x: 100, y: 30 }] },
+		], [], [], w);
+		ok(!('fellBack' in s), 'R9a 会话建立');
+		if (!('fellBack' in s)) {
+			s.routeInitial();
+			const score0 = s.summary().score;
+			const snap = s.snapshot();
+			s.setFrom('A', { x: 0, y: 500 }, undefined);
+			s.rerouteNets(['A']);
+			ok(s.summary().score > score0, 'R9b 改端点后重布得分变化');
+			s.restore(snap);
+			eq(s.summary().score, score0, 'R9c 快照恢复得分一致');
+		}
+	}
+
+	/* ---------------- S. 布线代价模型求解（v0.4.0） ---------------- */
+	{
+		const mkPad = (des: string, num: string, net: string, x: number, y: number): Pad => ({ designator: des, padNumber: num, net, x, y });
+		// S1 平行排：现状反序，布线模型应恢复平行（零过孔零未布通）
+		{
+			const boardPads: Pad[] = [];
+			for (let i = 0; i < 6; i++) {
+				const y = 100 + i * 100;
+				boardPads.push(mkPad('J1', String(i + 1), `N${5 - i}`, 1000, y));
+				boardPads.push(mkPad('J2', String(i + 1), `N${i}`, 200, y));
+			}
+			const slots: Slot[] = boardPads.filter(p => p.designator === 'J1').map(p => ({ pad: p, net: p.net }));
+			const nets: SwappableNet[] = slots.map(s => ({
+				net: s.net,
+				others: boardPads.filter(p => p.designator === 'J2' && p.net === s.net),
+			}));
+			const r = solveHeaderSwap(slots, nets, boardPads, 'J1', { weightMode: 'balanced', maxRefineIters: 4, costModel: 'routing' });
+			ok(r.costModelUsed === 'routing' && !!r.routing, 'S1a 布线模型生效');
+			if (r.routing) {
+				eq(r.routing.after.unrouted, 0, 'S1b 平行排全部布通');
+				eq(r.routing.after.vias, 0, 'S1c 平行排零过孔');
+				ok(r.routing.after.score < r.routing.before.score, 'S1d 布线得分改善');
+			}
+			eq(r.assignment.join(','), '5,4,3,2,1,0', 'S1e 恢复平行指派');
+			// S6 已最优的现状：保持不动（少动为佳）
+			const board2 = boardPads.map(p => (p.designator === 'J1' ? { ...p, net: `N${Number(p.padNumber) - 1}` } : p));
+			const slots2 = board2.filter(p => p.designator === 'J1').map(p => ({ pad: p, net: p.net }));
+			const nets2 = slots2.map(s => ({ net: s.net, others: board2.filter(p => p.designator === 'J2' && p.net === s.net) }));
+			const r2 = solveHeaderSwap(slots2, nets2, board2, 'J1', { weightMode: 'balanced', maxRefineIters: 4, costModel: 'routing' });
+			eq(r2.changedCount, 0, 'S6 已最优保持原状');
+		}
+		// S2 四边出线芯片（差评场景）：布线模型不差于鼠线模型（同一布线评估下）
+		{
+			const boardPads: Pad[] = [];
+			const pinAt: Array<{ x: number; y: number }> = [];
+			for (let i = 0; i < 4; i++) pinAt.push({ x: 800, y: 700 + i * 100 }); // 左边
+			for (let i = 0; i < 4; i++) pinAt.push({ x: 900 + i * 100, y: 600 }); // 下边
+			for (let i = 0; i < 4; i++) pinAt.push({ x: 800 + i * 100, y: 1200 }); // 上边
+			for (let i = 0; i < 4; i++) pinAt.push({ x: 1200, y: 700 + i * 100 }); // 右边
+			// 现状 = 90° 错位（边序 × 网络序旋转）：第 p 脚接 J2 第 (p+4)%16 位
+			pinAt.forEach((pt, p) => {
+				const j2Idx = (p + 4) % 16;
+				boardPads.push(mkPad('U1', String(p + 1), `M${j2Idx}`, pt.x, pt.y));
+				boardPads.push(mkPad('J2', String(j2Idx + 1), `M${j2Idx}`, 200, 400 + j2Idx * 100));
+			});
+			const slots: Slot[] = pinAt.map((pt, p) => {
+				const pad = boardPads.find(b => b.designator === 'U1' && b.padNumber === String(p + 1))!;
+				return { pad, net: pad.net };
+			});
+			const nets: SwappableNet[] = slots.map(s => ({ net: s.net, others: boardPads.filter(p => p.designator === 'J2' && p.net === s.net) }));
+			const rRou = solveHeaderSwap(slots, nets, boardPads, 'U1', { weightMode: 'balanced', maxRefineIters: 4, costModel: 'routing' });
+			ok(rRou.costModelUsed === 'routing' && !!rRou.routing, 'S2a 四边芯片布线模型生效');
+			ok(rRou.routing && rRou.routing.after.unrouted <= rRou.routing.before.unrouted, 'S2b 未布通不增加');
+			ok(rRou.routing && rRou.routing.after.score <= rRou.routing.before.score, 'S2c 布线得分不劣化');
+			const rRat = solveHeaderSwap(slots, nets, boardPads, 'U1', { weightMode: 'balanced', maxRefineIters: 4, costModel: 'ratsnest' });
+			// 同一布线会话评估两个模型的指派（公平对照）
+			const factsMap = deriveDeviceFactsMap(boardPads);
+			const devFacts = factsMap.get('U1')!;
+			const routePads = boardPads.map((p) => {
+				const f = factsMap.get(p.designator);
+				return { x: p.x, y: p.y, r: f ? f.padR : 8, net: p.net };
+			});
+			const bodies = [...factsMap.values()].filter(f => f.body).map(f => f.body!);
+			const weights = { ...DEFAULT_ROUTING_WEIGHTS, gridMil: Math.min(25, Math.max(5, Math.round(devFacts.pitch * 0.5))) };
+			const evalAsg = (asg: number[]): number => {
+				const reqs = asg.map((netIdx, slotIdx) => ({
+					net: nets[netIdx].net,
+					from: slots[slotIdx].pad as { x: number; y: number },
+					fromEscape: escapeOf(devFacts, slots[slotIdx].pad) ?? undefined,
+					fromR: devFacts.padR,
+					targets: nets[netIdx].others,
+				})).filter((_, i) => nets[asg[i]].others.length > 0);
+				const sess = createRoutingSession(reqs, routePads, bodies, weights);
+				if ('fellBack' in sess)
+					return Number.POSITIVE_INFINITY;
+				sess.routeInitial();
+				return sess.summary().score;
+			};
+			ok(evalAsg(rRou.assignment) <= evalAsg(rRat.assignment) + 1e-6, 'S2d 布线模型指派不差于旧模型（同一布线评估）');
+			ok(rRou.routing && evalAsg(rRou.assignment) < evalAsg(slots.map((_, i) => i)), 'S2e 新指派优于现状');
+		}
+		// S3/S4 auto：小板用布线，超上限回退鼠线；强制 routing 超限报错
+		{
+			const small: Pad[] = [];
+			for (let i = 0; i < 3; i++) {
+				small.push(mkPad('K1', String(i + 1), `L${2 - i}`, 900, 100 + i * 100));
+				small.push(mkPad('K2', String(i + 1), `L${i}`, 300, 100 + i * 100));
+			}
+			const s1 = small.filter(p => p.designator === 'K1').map(p => ({ pad: p, net: p.net }));
+			const n1 = s1.map(s => ({ net: s.net, others: small.filter(p => p.designator === 'K2' && p.net === s.net) }));
+			const ra = solveHeaderSwap(s1, n1, small, 'K1', { weightMode: 'balanced', maxRefineIters: 2, costModel: 'auto' });
+			ok(ra.costModelUsed === 'routing', 'S3 auto 小板自动用布线模型');
+			const big: Pad[] = [];
+			const K = 65;
+			for (let i = 0; i < K; i++) {
+				big.push(mkPad('B1', String(i + 1), `O${(i * 7) % K}`, 900, i * 50));
+				big.push(mkPad('B2', String(i + 1), `O${i}`, 300, i * 50));
+			}
+			const sb = big.filter(p => p.designator === 'B1').map(p => ({ pad: p, net: p.net }));
+			const nb = sb.map(s => ({ net: s.net, others: big.filter(p => p.designator === 'B2' && p.net === s.net) }));
+			const rb = solveHeaderSwap(sb, nb, big, 'B1', { weightMode: 'balanced', maxRefineIters: 1, costModel: 'auto' });
+			ok(rb.costModelUsed === 'ratsnest' && rb.routingNotes.some(t => t.includes('回退鼠线')), 'S4 auto 超上限回退鼠线模型');
+			let threw = false;
+			try {
+				solveHeaderSwap(sb, nb, big, 'B1', { weightMode: 'balanced', maxRefineIters: 1, costModel: 'routing' });
+			}
+			catch {
+				threw = true;
+			}
+			ok(threw, 'S5 强制布线模型超限时报错');
+		}
 	}
 
 	/* ---------------- 汇总 ---------------- */
