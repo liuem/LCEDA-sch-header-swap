@@ -579,6 +579,10 @@ export function createRoutingSession(
 	};
 	const routeAllOrdered = (): void => {
 		const order = [...reqMap.values()].sort((a, b) => est(a) - est(b)).map(r => r.net);
+		// 先清空再按序重布：增量精修后的会话带着旧占用逐网撕布会与"干净顺序布线"
+		// 不同 footing——同一指派两次打分不一致（实机 FPC2 抓到 4360 vs 4300）
+		clearOccupancy();
+		paths.clear();
 		routeOrder(order);
 		// 重试轮：未布通的网优先重排（全撕重布，最多 3 轮）
 		for (let round = 0; round < 3; round++) {

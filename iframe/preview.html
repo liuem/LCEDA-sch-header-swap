@@ -72,7 +72,7 @@
 		'net-mismatch': '原理图/PCB 网络名不一致（同步时需手动）',
 	};
 
-	function fmtMm(mil) { return (Math.round(mil / 10) / 100).toFixed(2); }
+	function fmtMm(mil) { return (mil / 39.37).toFixed(2); }
 	function esc(s) {
 		return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
 			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];

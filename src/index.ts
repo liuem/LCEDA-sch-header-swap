@@ -187,7 +187,7 @@ function routedWarningsOf(report: SwapReport, device: string): string[] {
 	if (!plan)
 		return [];
 	const affected = new Set(plan.pins.filter(x => x.swappable && x.newNet !== x.oldNet).map(x => x.oldNet));
-	return [...affected].filter(n => (report.routedLengthMil[n] ?? 0) > 0).map(n => `${n}（已有走线约 ${Math.round((report.routedLengthMil[n] ?? 0) / 10) / 100}mm）`);
+	return [...affected].filter(n => (report.routedLengthMil[n] ?? 0) > 0).map(n => `${n}（已有走线约 ${((report.routedLengthMil[n] ?? 0) / 39.37).toFixed(1)}mm）`);
 }
 
 /** 把所选器件的方案应用到 PCB 焊盘（预览窗按钮经 MessageBus 调用，也可直接调用） */
